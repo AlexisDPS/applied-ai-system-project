@@ -37,6 +37,7 @@ class Owner:
                 {
                     "name": pet.name,
                     "age": pet.age,
+                    "species": pet.species,
                     "breed": pet.breed,
                     "tasks": [
                         {
@@ -64,7 +65,14 @@ class Owner:
 
         owner = Owner(name=data["name"], age=data["age"])
         for pet_data in data["pets"]:
-            pet = Pet(name=pet_data["name"], age=pet_data["age"], breed=pet_data["breed"], owner=owner)
+            pet = Pet(
+    name=pet_data["name"],
+    age=pet_data["age"],
+    species=pet_data.get("species", "other"),
+    breed=pet_data["breed"],
+    owner=owner,
+    )
+            
             owner.add_pet(pet)
             for task_data in pet_data["tasks"]:
                 task = Task(
@@ -84,6 +92,7 @@ class Owner:
 class Pet:
     name: str
     age: int
+    species: str
     breed: str
     owner: Owner
     tasks: List["Task"] = field(default_factory=list)

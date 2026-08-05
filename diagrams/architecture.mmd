@@ -1,0 +1,27 @@
+flowchart TD
+    User[User]
+    UI[Streamlit UI app.py / CLI main.py]
+    Scheduler[Existing PawPal Scheduler pawpal_system.py: Owner, Pet, Task, Schedule]
+    Retriever[Knowledge Retriever retriever.py: KnowledgeRetriever]
+    KnowledgeFolder[(knowledge/ folder: dog_care.md, cat_care.md, fish_care.md, veterinary_guidelines.md)]
+    AIComponent[Specialized AI Planning Component ai_care_planner.py: AICarePlanner]
+    Guardrails[Guardrails guardrails.py: guard_report]
+    Review[AI Care Review CareReviewReport]
+
+    User --> UI
+    UI --> Scheduler
+    Scheduler --> AIComponent
+    Retriever --> KnowledgeFolder
+    KnowledgeFolder --> Retriever
+    Retriever --> AIComponent
+    AIComponent --> Retriever
+    AIComponent --> Guardrails
+    Guardrails --> Review
+    Review --> User
+
+    Evaluate[evaluate.py evaluation harness]
+    Tests[pytest test suite tests/test_pawpal.py]
+
+    Evaluate -.-> AIComponent
+    Evaluate -.-> Guardrails
+    Tests -.-> Scheduler

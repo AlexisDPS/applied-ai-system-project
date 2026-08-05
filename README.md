@@ -1,243 +1,344 @@
-# PawPal+ (Module 2 Project)
+    # PawPal AI Care Planner
+
+    PawPal AI Care Planner is a Python pet-care scheduling application that plans a pet
+    owner's daily care tasks and then automatically reviews the generated schedule with
+    a specialized AI planning component that scores coverage, flags gaps, and provides veterinarian-toned recommendations grounded in a local knowledge base.
+
+    The project has two parts:
+
+    1. **The scheduler (PawPal+)** — the original project: `Owner`, `Pet`, `Task`, and `Schedule` classes that build, sort, filter, and explain a day's pet-care plan.
+    2. **The AI Care Planner extension** — a review layer (`ai_care_planner.py`,
+    `guardrails.py`, `retriever.py`, `knowledge/`) that reads an already-built
+    schedule and produces an automatic quality review, without changing how the
+    schedule itself is built.
+
+    ---
+
+    ## 1. Original Project Description
+
+    **Scenario:** A busy pet owner needs help staying consistent with pet care. They
+    want an assistant that can track care tasks (walks, feeding, grooming, litter/tank
+    cleaning, vet visits, etc.), take constraints into account (time available and task
+    priority), and produce a daily plan.
+
+    **Core classes** (`pawpal_system.py`):
+
+    | Class      | Responsibility |
+    |------------|-----------------|
+    | `Owner`    | Stores the owner's info, holds a list of `Pet`s, aggregates all tasks across pets, and persists everything to/from `data.json`. |
+    | `Pet`      | Stores a pet's name, age, **species**, breed, owner, and its own list of `Task`s. |
+    | `Task`     | A single care task: type, duration, priority, frequency, due date, and completion state. Completing a daily/weekly task automatically spawns its next occurrence. |
+    | `Schedule` | Builds a day's plan from an owner's pending tasks within a time budget, sorts by time or priority, filters tasks, detects same-time conflicts, and explains the resulting plan. |
+
+    **Implemented scheduler features:**
+
+    - **Sorting** — `sort_by_time()` (shortest first) and `sort_by_priority()`
+    (high → medium → low, ties broken by shorter duration).
+    - **Schedule generation** — `create_schedule()` greedily fits pending tasks,
+    priority-first, into the owner's available time.
+    - **Filtering** — `filter_tasks()` by completion status and/or pet name.
+    - **Conflict detection** — `find_conflicts()` flags any two tasks due at the exact
+    same timestamp.
+    - **Recurring tasks** — `Task.mark_complete()` automatically creates the next
+    daily/weekly occurrence of a task.
+    - **Explanations** — `Schedule.explain()` gives a human-readable reason for each
+    scheduled task.
+    - **Persistence** — `Owner.save_to_json()` / `Owner.load_from_json()` round-trip
+    the owner, pets, and tasks through `data.json`.
+
+    This part of the system is unchanged by the AI extension below — the AI layer only
+    *reads* `Schedule` output, it never sorts, filters, or builds a schedule itself.
+
+    ---
+
+    ## 2. AI Extension: The AI Care Planner
+
+    The AI Care Planner adds an automatic review step that runs immediately after a
+    schedule is generated, in both the CLI (`main.py`) and the Streamlit app (`app.py`).
+    It answers one question in a professional, veterinarian-style tone: **"How well
+    does this schedule actually cover each pet's routine care needs, and what should
+    the owner add next?"**
+
+    For every pet with tasks, it produces:
+
+    - A **schedule score from 1.0–10.0**
+    - A **confidence level** (`High` / `Medium` / `Low`)
+    - A short professional **summary**
+    - Up to **10 recommendations** for additional or overdue tasks
+    - Whether the review had to **fall back** to general veterinary guidance because
+    the pet's species has no dedicated knowledge base entry
+
+    If there is nothing to review — no tasks at all, or tasks exist but no schedule has
+    been generated — the system **honestly reports that no AI review can be
+    generated** instead of fabricating a score.
+
+    ### New files
+
+    | File | Purpose |
+    |------|---------|
+    | `retriever.py` | `KnowledgeRetriever` — loads species-specific guidance from `knowledge/*.md`, falling back to `veterinary_guidelines.md` for unrecognized species. |
+    | `knowledge/*.md` | Local knowledge base: `dog_care.md`, `cat_care.md`, `fish_care.md`, `veterinary_guidelines.md`. |
+    | `ai_care_planner.py` | `AICarePlanner` — reads a `Schedule` and produces a `CareReviewReport` (score, confidence, summary, recommendations per pet). |
+    | `guardrails.py` | Safety/consistency layer — clamps scores, validates confidence values, caps/deduplicates recommendations, strips medical-diagnosis-style language, and attaches the standing veterinary disclaimer. |
+    | `evaluate.py` | Standalone evaluation harness that exercises the AI layer across representative scenarios and asserts its guarantees hold. |
+
+    ---
+
+    ## 3. Architecture Overview
 
-You are building **PawPal+**, a Streamlit app that helps a pet owner plan care tasks for their pet.
+    ```
+    Owner / Pet / Task            (pawpal_system.py — unchanged scheduling model)
+            │
+            ▼
+        Schedule                  (pawpal_system.py — builds today's plan)
+            │  (read-only)
+            ▼
+    AICarePlanner.review_schedule(schedule)      (ai_care_planner.py)
+            │
+            ├─► KnowledgeRetriever.retrieve(species)   (retriever.py)
+            │        └─► knowledge/{dog,cat,fish}_care.md
+            │            knowledge/veterinary_guidelines.md  (fallback)
+            │
+            ├─► per-pet scoring, summary, recommendations
+            │
+            ▼
+    guardrails.guard_report(report)             (guardrails.py)
+            │   (clamp score, validate confidence, cap/dedupe
+            │    recommendations, strip unsafe language, add disclaimer)
+            ▼
+    CareReviewReport  ──►  rendered in main.py (CLI) and app.py (Streamlit)
+    ```
 
-## Scenario
+    Key design decisions:
 
-A busy pet owner needs help staying consistent with pet care. They want an assistant that can:
+    - **Separation of concerns.** `AICarePlanner` never touches `Schedule`'s sorting,
+    filtering, or scheduling logic — it only reads `schedule.scheduled_tasks`,
+    `schedule.owner`, and `schedule.find_conflicts()`. All scheduling logic remains
+    exactly as originally implemented.
+    - **No external AI/API calls.** The specialized AI planning component uses deterministic reasoning over the generated schedule and local knowledge base rather than relying on an external hosted model. This keeps the system fully offline, reproducible, and easy to evaluate — appropriate for a safety-sensitive domain like pet care.
+    - **Guardrails are a separate, mandatory pass.** Every report returned to a caller
+    has already been through `guardrails.guard_report()`, so all entry points
+    (CLI, UI, evaluation script) get the same safety guarantees for free.
 
-- Track pet care tasks (walks, feeding, meds, enrichment, grooming, etc.)
-- Consider constraints (time available, priority, owner preferences)
-- Produce a daily plan and explain why it chose that plan
+    ---
 
-Your job is to design the system first (UML), then implement the logic in Python, then connect it to the Streamlit UI.
+    ## Design Decisions
 
-## What you will build
+    Several design decisions shaped the final system:
 
-Your final app should:
+    - Added support for dogs, cats, and fish through a local knowledge base.
+    - Unknown species automatically fall back to general veterinary guidance when no species-specific information is available.
+    - The AI review uses each pet's name to provide more personalized feedback.
+    - Every AI review includes a schedule score from 1.0–10.0 and a confidence rating (High, Medium, or Low).
+    - The AI automatically reviews every generated schedule rather than requiring a separate action from the user.
 
-- Let a user enter basic owner + pet info
-- Let a user add/edit tasks (duration + priority at minimum)
-- Generate a daily schedule/plan based on constraints and priorities
-- Display the plan clearly (and ideally explain the reasoning)
-- Include tests for the most important scheduling behaviors
+    ---
 
-## Features
+    ## 4. Installation
 
-- **Task sorting** — `Schedule.sort_by_time()` orders tasks from shortest to longest, so quick tasks get scheduled first.
-- **Task filtering** — `Schedule.filter_tasks()` filters tasks by completion status, by pet name, or both at once.
-- **Conflict warnings** — `Schedule.find_conflicts()` scans all tasks and flags any two tasks scheduled for the exact same date and time.
-- **Daily & weekly recurring tasks** — `Task.mark_complete()` automatically creates the next occurrence of a task (one day later for daily tasks, one week later for weekly tasks) when it's marked done.
-- **Schedule generation** — `Schedule.create_schedule()` builds a day's schedule by sorting pending tasks by time and fitting as many as possible into the owner's available time.
+    ```bash
+    python -m venv .venv
+    source .venv/bin/activate      # Windows: .venv\Scripts\activate
+    pip install -r requirements.txt
+    ```
 
-## Getting started
+    Dependencies (`requirements.txt`): `streamlit`, `pytest`, `tabulate`.
+
+    ---
+
+    ## 5. Usage
+
+    ### Command line
+
+    ```bash
+    python main.py
+    ```
 
-### Setup
+    Builds a small sample owner with two pets (a dog and a cat), generates today's
+    schedule, prints all the existing scheduler views (sorted tasks, conflicts, next
+    available slot), then prints the **AI Care Review**, and finally saves/reloads
+    `data.json`.
 
-```bash
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
+    ### Streamlit app
 
-### Suggested workflow
-
-1. Read the scenario carefully and identify requirements and edge cases.
-2. Draft a UML diagram (classes, attributes, methods, relationships).
-3. Convert UML into Python class stubs (no logic yet).
-4. Implement scheduling logic in small increments.
-5. Add tests to verify key behaviors.
-6. Connect your logic to the Streamlit UI in `app.py`.
-7. Refine UML so it matches what you actually built.
-
-## 🖥️ Sample Output
-
-Running `python main.py` prints a formatted table for each section (see [🖨️ Output Formatting](#-output-formatting) below for a full example).
-
-## 🧪 Testing PawPal+
-
-```bash
-# Run the full test suite:
-python -m pytest
-```
-
-These tests verify that task sorting, recurring task creation, and scheduling conflict detection work correctly.
-
-Sample test output:
-
-```text
-collected 5 items
-
-tests/test_pawpal.py .....                                            [100%]
-
-5 passed in 0.05s
-```
-
-**Confidence Level:** 5/5
-
-Reason: All five automated tests passed successfully. They covered the core scheduling features including sorting, recurring tasks, and conflict detection.
-
-## 📐 Smarter Scheduling
-
-> Fill in once you've implemented scheduling logic.
-
-| Feature           | Method(s)                 | Notes                                                                     |
-| ----------------- | ------------------------- | ------------------------------------------------------------------------- |
-| Task sorting      | Schedule.sort_by_time()     | Sorts tasks by time_to_complete (shortest to longest).                                                  |
-| Priority sorting  | Schedule.sort_by_priority() | Sorts tasks high → medium → low priority; ties are broken by shorter time_to_complete. Used by `create_schedule()`. |
-| Filtering         | Schedule.filter_tasks()     | Filters tasks by pet name or completion status.                                                         |
-| Conflict handling | Schedule.find_conflicts()   | Detects tasks scheduled at the same time and returns warning messages.                                  |
-| Recurring tasks   | Task.mark_complete()        | Creates the next daily or weekly task when a recurring task is completed.                               |
-
-## 🥇 Priority Scheduling
-
-`Schedule.create_schedule()` now sorts pending tasks by **priority first** (high, then medium, then low), and uses `time_to_complete` as a tiebreaker within the same priority. This means important tasks get scheduled ahead of less important ones, even if a lower-priority task would take less time.
-
-Sample output from `main.py`, showing a high-priority "Morning walk" (30 min) scheduled before a medium-priority "Litter box cleaning" (15 min):
-
-```text
-Today's Schedule
------------------
-Biscuit: Feeding (high priority, 10 min)
-Biscuit: Morning walk (high priority, 30 min)
-Mochi: Litter box cleaning (medium priority, 15 min)
-
-All Tasks Sorted by Priority (then Time)
-------------------------------------------
-Biscuit: Feeding (high priority, 10 min)
-Biscuit: Morning walk (high priority, 30 min)
-Biscuit: Vet checkup (high priority, 30 min)
-Mochi: Litter box cleaning (medium priority, 15 min)
-Mochi: Litter box cleaning (medium priority, 15 min)
-Mochi: Grooming (medium priority, 30 min)
-Mochi: Playtime (low priority, 20 min)
-```
-
-## 🖨️ Output Formatting
-
-Both the CLI (`main.py`) and the Streamlit UI (`app.py`) present tasks with structured tables and status indicators instead of plain text lines.
-
-- **CLI tables** — `main.py` uses the [`tabulate`](https://pypi.org/project/tabulate/) library (added to `requirements.txt`) to render each section (schedule, sorted tasks, completed tasks, per-pet tasks) as a grid table via `tabulate(rows, headers="keys", tablefmt="grid")`.
-- **Status indicators** — a small `priority_label()` helper maps `"high"/"medium"/"low"` to 🔴/🟡/🟢, and a `status_label()` helper maps `is_completed` to ✅ Done / ⏳ Pending. Both are defined once in `main.py` and mirrored in `app.py` for consistency.
-- **Conflict warnings** — printed with a ⚠️ prefix in the CLI, and shown with `st.warning()` in the UI; a clean schedule shows a ✅ success message in both places.
-- **Streamlit UI** — task and schedule tables use `st.table()` with the same priority/status emoji labels, section headers use emoji + `st.subheader()`/`st.markdown()`, and confirmations (adding a pet/task, generating a schedule, no conflicts) use `st.success()`.
-
-Sample CLI output from `python main.py`:
-
-```text
-==================================================
-🐾  PawPal+ Daily Schedule
-==================================================
-
-📅 Today's Schedule
-------------------
-+---------+---------------------+------------+--------------+
-| Pet     | Task                | Priority   |   Time (min) |
-+=========+=====================+============+==============+
-| Biscuit | Feeding             | 🔴 High     |           10 |
-+---------+---------------------+------------+--------------+
-| Biscuit | Morning walk        | 🔴 High     |           30 |
-+---------+---------------------+------------+--------------+
-| Mochi   | Litter box cleaning | 🟡 Medium   |           15 |
-+---------+---------------------+------------+--------------+
-
-✅ Completed Tasks
------------------
-+-------+---------------------+----------+
-| Pet   | Task                | Status   |
-+=======+=====================+==========+
-| Mochi | Litter box cleaning | ✅ Done   |
-+-------+---------------------+----------+
-
-⚠️  Scheduling Conflicts
-------------------------
-⚠️  Warning: Biscuit's 'Vet checkup' and Mochi's 'Grooming' are both scheduled at 2026-07-08 08:00.
-```
-
-> **Note:** on Windows, the console defaults to an encoding that can't print emoji, so `main.py` calls `sys.stdout.reconfigure(encoding="utf-8")` at startup to fix this.
-
-## 💾 Data Persistence
-
-PawPal+ saves pets and tasks to a local `data.json` file so your data survives between runs.
-
-- `Owner.save_to_json()` converts the owner, their pets, and all tasks into plain dictionaries and writes them to `data.json` using Python's built-in `json` module.
-- `Owner.load_from_json()` reads `data.json` back and reconstructs the `Owner`, `Pet`, and `Task` objects.
-- **`app.py`** loads `data.json` automatically when the app starts (falling back to a fresh owner if the file doesn't exist yet), and saves automatically whenever a pet or task is added.
-- **`main.py`** demonstrates saving the sample data to `data.json` and reloading it.
-- `data.json` is generated at runtime and is excluded from version control via `.gitignore`.
-
-**Files modified for this feature:** `pawpal_system.py`, `app.py`, `main.py`, `.gitignore`, `README.md`.
-
-## 📸 Demo Walkthrough
-
-### What you can do in the app
-
-The Streamlit app (`app.py`) lets you:
-
-- Enter an owner name and add one or more pets (name, breed, species).
-- Add care tasks to a selected pet (title, duration in minutes, priority).
-- Set the total time available for the day and generate a schedule.
-- See the generated schedule, tasks sorted by time, pending tasks, and any scheduling conflicts.
-
-### Example workflow
-
-1. **Add a pet** — enter a pet name and breed, then click "Add pet." The pet appears in the "Current pets" table.
-2. **Add tasks** — select the pet, enter a task title, duration, and priority, then click "Add task." Repeat for as many tasks as you like, across one or more pets.
-3. **Set time available** — enter how many minutes you have for the day.
-4. **Generate today's schedule** — click "Generate schedule" to see which tasks fit in the available time, sorted shortest-first.
-
-### Scheduler behaviors demonstrated
-
-- **Sorting** — the "Tasks Sorted by Time" table always lists tasks shortest-to-longest, so quick wins are scheduled first.
-- **Filtering** — the "Pending Tasks" table filters out anything already marked complete.
-- **Conflict warnings** — if two tasks share the exact same due date/time, a warning is shown for each conflicting pair; otherwise a success message confirms there are no conflicts.
-- **Recurring tasks** — completing a daily or weekly task automatically creates its next occurrence (one day or one week later), so the schedule stays populated over time.
-
-### Sample CLI output (`main.py`)
-
-`main.py` builds a small sample owner/pet/task setup (including one completed recurring task and two tasks scheduled at the same time) and prints the results directly to the console:
-
-```bash
-python main.py
-```
-
-```text
-Today's Schedule
------------------
-Biscuit: Feeding (high priority, 10 min)
-Mochi: Litter box cleaning (medium priority, 15 min)
-Mochi: Playtime (low priority, 20 min)
-
-All Tasks Sorted by Time
--------------------------
-Biscuit: Feeding (10 min)
-Mochi: Litter box cleaning (15 min)
-Mochi: Litter box cleaning (15 min)
-Mochi: Playtime (20 min)
-Biscuit: Morning walk (30 min)
-Biscuit: Vet checkup (30 min)
-Mochi: Grooming (30 min)
-
-Completed Tasks
-----------------
-Mochi: Litter box cleaning
-
-Mochi's Tasks
---------------
-Playtime (pending, due 2026-07-07)
-Litter box cleaning (done, due 2026-07-07)
-Grooming (pending, due 2026-07-08)
-Litter box cleaning (pending, due 2026-07-08)
-
-Scheduling Conflicts
----------------------
-Warning: Biscuit's 'Vet checkup' and Mochi's 'Grooming' are both scheduled at 2026-07-08 08:00.
-```
-
-Note the second "Litter box cleaning" entry — that's the new task automatically created after the original one was marked complete, due the next day.
-
-**Screenshot or video** _(optional)_: <!-- Insert a screenshot or link to a demo video here -->
-
-## 📊 Final UML Diagram
-
-![Final UML Diagram](diagrams/uml_final.png)
+    ```bash
+    streamlit run app.py
+    ```
+
+    Add an owner, add pets (with species), add tasks, set the available time, and
+    click **Generate schedule**. The scheduler output appears first, followed by a
+    **🩺 AI Care Review** section with per-pet scores, confidence, and recommendations.
+
+    ### Tests
+
+    ```bash
+    python -m pytest
+    ```
+
+    ### AI evaluation harness
+
+    ```bash
+    python evaluate.py
+    ```
+
+    ---
+
+    ## 6. Reproducible Example
+
+    Running `python main.py` against the sample data (Biscuit the dog, Mochi the cat,
+    one overdue vet checkup, and a same-time conflict) produces output like:
+
+    ```text
+    🩺 AI Care Review
+    ----------------
+    Overall schedule score for Jordan's pets: 6.9 / 10.0  |  Confidence: 🟢 High
+
+    Biscuit (dog)
+    Score: 5.4 / 10.0  |  Confidence: 🟢 High
+    Biscuit's schedule covers 2/3 core care categories (feeding, exercise/enrichment, grooming/habitat) with 2 task(s) planned for today.
+    Recommendations:
+        - Consider adding a grooming or habitat-cleaning task for Biscuit; see the dog care guidance in the knowledge base.
+        - Biscuit's 'Vet checkup' is overdue (was due 2026-07-08 08:00); reschedule it soon.
+        - Biscuit's 'Feeding' is overdue (was due 2026-08-04 22:14); reschedule it soon.
+        - Biscuit's 'Morning walk' is overdue (was due 2026-08-04 22:14); reschedule it soon.
+
+    Mochi (cat)
+    Score: 8.4 / 10.0  |  Confidence: 🟢 High
+    Mochi's schedule covers 2/3 core care categories (feeding, exercise/enrichment, grooming/habitat) with 1 task(s) planned for today.
+    Recommendations:
+        - Consider adding a feeding task for Mochi; see the cat care guidance in the knowledge base.
+        - Mochi's 'Grooming' is overdue (was due 2026-07-08 08:00); reschedule it soon.
+        - Mochi's 'Playtime' is overdue (was due 2026-08-04 22:14); reschedule it soon.
+
+    Notes:
+        - 1 scheduling conflict(s) were detected across pets; review the conflict list before finalizing today's plan.
+        - This AI review supports pet care scheduling only. It does not diagnose illness, prescribe treatment, or replace a licensed veterinarian.
+    ```
+
+    This example is fully reproducible by running `python main.py` — the sample owner,
+    pets, and tasks are hardcoded in the script (only the "overdue" timestamps will
+    shift relative to whenever you run it, since they're computed from `datetime.now()`).
+
+    ---
+
+    ## 7. AI Feature Explanation
+
+    `AICarePlanner.review_schedule(schedule)` works in three steps per pet:
+
+    1. **Category coverage.** Each of the pet's tasks is matched against keyword
+    groups for three core care categories — `feeding`, `exercise_enrichment`, and
+    `grooming_habitat` (e.g. "walk" and "play" match exercise/enrichment; "litter",
+    "tank", and "brush" match grooming/habitat). The set of categories actually
+    represented is compared against the expected set.
+
+    2. **Scoring.** A pet's score starts at a baseline of 5.0, then:
+    - `+1.2` per core category covered (up to `+3.6` for full coverage)
+    - `+1.0` if at least one of the pet's tasks made it into today's schedule
+    - `-1.0` per high-priority task that is both overdue and unscheduled
+    - `-0.5` per additional high-priority task left unscheduled
+    The result is clamped to `1.0–10.0` by `guardrails.clamp_score()`.
+
+    3. **Recommendations & confidence.** `KnowledgeRetriever.retrieve(pet.species)`
+    looks up `knowledge/{species}_care.md`. Known species (`dog`, `cat`, `fish`) get
+    `confidence="High"`; any other species falls back to
+    `knowledge/veterinary_guidelines.md` with `confidence="Medium"` and an explicit
+    recommendation disclosing the fallback. Missing categories and overdue tasks are
+    turned into concrete, pet-name-specific recommendations (e.g. *"Consider adding
+    a feeding task for Mochi..."*), capped at 10 by
+    `guardrails.enforce_recommendation_limit()`.
+
+    The overall report's confidence is the **lowest** confidence across all pet
+    reviews, so one fallback pet appropriately lowers the whole household's confidence
+    rating.
+
+    ---
+
+    ## 8. Reliability & Guardrails
+
+    All safety and consistency rules live in `guardrails.py` and are applied to every
+    report before it is returned:
+
+    - **Score bounds** — `clamp_score()` guarantees every score is a float in
+    `[1.0, 10.0]`, rounded to one decimal, regardless of what the scoring heuristic
+    computes.
+    - **Confidence validity** — `validate_confidence()` forces any unrecognized value
+    down to `"Low"` rather than surfacing an invalid label.
+    - **Recommendation limits** — `enforce_recommendation_limit()` deduplicates and
+    caps recommendations at 10.
+    - **No medical advice** — `sanitize_text()` regex-redacts diagnosis/prescription/
+    dosage/treatment-style language (e.g. "diagnose", "administer", "mg/kg") from any
+    generated text, replacing it with `[reviewed]`.
+    - **Standing disclaimer** — `guard_report()` appends a fixed disclaimer to every
+    report: *"This AI review supports pet care scheduling only. It does not diagnose
+    illness, prescribe treatment, or replace a licensed veterinarian."*
+    - **Honest "no review" path** — if an owner has no tasks, or has tasks but no
+    generated schedule, `AICarePlanner` returns `available=False` with an explanatory
+    note instead of inventing a score.
+
+    ---
+
+    ## 9. Evaluation Script
+
+    `evaluate.py` is a standalone harness (separate from the pytest suite) that checks
+    the AI layer's *behavior*, not the scheduler's. It runs 7 scenarios and 18 checks:
+
+    | Scenario | What it verifies |
+    |----------|-------------------|
+    | Full care-category coverage (dog) | Valid score/confidence, no false "missing category" recommendations, pet name in summary. |
+    | Missing care categories (cat) | Missing categories are recommended, capped at 10, pet name included. |
+    | Unknown species fallback | `fallback_used=True`, confidence downgraded to `Medium`, fallback disclosed as a recommendation. |
+    | No tasks at all | Report honestly marked unavailable, no pet reviews, explanatory note present. |
+    | Tasks exist but no schedule generated | Same honest "unavailable" behavior. |
+    | Overdue high-priority task | Overdue task is surfaced in recommendations. |
+    | Guardrail language stripping | Medical-sounding terms are redacted from sanitized text. |
+
+    Run it with:
+
+    ```bash
+    python evaluate.py
+    ```
+
+    Latest run: **18/18 checks passed.**
+
+    ---
+
+    ## 10. Testing Summary
+
+    `tests/test_pawpal.py` covers the core scheduler behaviors with `pytest`:
+
+    - `mark_complete()` correctly flips a task's completion status.
+    - Adding a task increases a pet's task count.
+    - `sort_by_time()` orders tasks shortest-to-longest.
+    - Completing a daily task spawns its next occurrence exactly one day later.
+    - `find_conflicts()` correctly flags two different pets' tasks scheduled at the
+    same timestamp.
+
+    ```bash
+    $ python -m pytest -q
+    .....
+    5 passed in 0.03s
+    ```
+
+    **Confidence level:** 5/5 — all scheduler tests pass, and the AI layer's own
+    18-check evaluation harness (`evaluate.py`) also passes in full, covering the score
+    range, confidence fallback, recommendation limits, the honest "no review" path, and
+    guardrail text sanitization.
+
+    ---
+
+    ## 11. Future Improvements
+
+    - **Richer category detection** — replace keyword matching with a small
+    configurable taxonomy per species (e.g. distinguishing "tank cleaning" from
+    "water change" for fish) as the knowledge base grows.
+    - **Trend-aware scoring** — factor in a pet's task history over multiple days
+    (e.g. consistently skipped categories) rather than scoring a single day's
+    schedule in isolation.
+    - **Owner-level recommendations** — surface cross-pet suggestions (e.g. balancing
+    time allocation when one pet's tasks crowd out another's).
+    - **Configurable knowledge base** — allow additional species files to be dropped
+    into `knowledge/` and picked up by `KnowledgeRetriever` without code changes
+    (currently the dog/cat/fish mapping is hardcoded in `retriever.py`).
+    - **UI surfacing of guardrail redactions** — currently sanitized text silently
+    replaces blocked terms with `[reviewed]`; a future version could log when
+    redaction occurred for transparency during development.

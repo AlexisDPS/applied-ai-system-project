@@ -5,7 +5,13 @@ from pawpal_system import Owner, Pet, Task, Schedule
 
 def test_mark_complete_changes_status():
     owner = Owner(name="Jordan", age=30)
-    pet = Pet(name="Biscuit", age=3, breed="Golden Retriever", owner=owner)
+    pet = Pet(
+    name="Biscuit",
+    age=3,
+    species="dog",
+    breed="Golden Retriever",
+    owner=owner,
+)
     task = Task(task_type="Morning walk", time_to_complete=30, priority="high", pet=pet)
 
     assert task.is_completed is False
@@ -17,7 +23,13 @@ def test_mark_complete_changes_status():
 
 def test_add_task_increases_pet_task_count():
     owner = Owner(name="Jordan", age=30)
-    pet = Pet(name="Biscuit", age=3, breed="Golden Retriever", owner=owner)
+    pet = Pet(
+    name="Biscuit",
+    age=3,
+    species="dog",
+    breed="Golden Retriever",
+    owner=owner,
+)
     task = Task(task_type="Feeding", time_to_complete=10, priority="high", pet=pet)
 
     assert len(pet.tasks) == 0
@@ -29,7 +41,13 @@ def test_add_task_increases_pet_task_count():
 
 def test_sort_by_time_orders_tasks_shortest_first():
     owner = Owner(name="Jordan", age=30)
-    pet = Pet(name="Biscuit", age=3, breed="Golden Retriever", owner=owner)
+    pet = Pet(
+    name="Biscuit",
+    age=3,
+    species="dog",
+    breed="Golden Retriever",
+    owner=owner,
+)
 
     long_task = Task(task_type="Walk", time_to_complete=30, priority="high", pet=pet)
     short_task = Task(task_type="Feeding", time_to_complete=10, priority="high", pet=pet)
@@ -43,7 +61,13 @@ def test_sort_by_time_orders_tasks_shortest_first():
 
 def test_mark_complete_on_daily_task_creates_next_day_task():
     owner = Owner(name="Jordan", age=30)
-    pet = Pet(name="Biscuit", age=3, breed="Golden Retriever", owner=owner)
+    pet = Pet(
+    name="Biscuit",
+    age=3,
+    species="dog",
+    breed="Golden Retriever",
+    owner=owner,
+)
     task = Task(
         task_type="Feeding",
         time_to_complete=10,
@@ -69,8 +93,8 @@ def test_mark_complete_on_daily_task_creates_next_day_task():
 
 def test_find_conflicts_flags_tasks_at_the_same_time():
     owner = Owner(name="Jordan", age=30)
-    biscuit = Pet(name="Biscuit", age=3, breed="Golden Retriever", owner=owner)
-    mochi = Pet(name="Mochi", age=2, breed="Tabby Cat", owner=owner)
+    biscuit = Pet(name="Biscuit", age=3, species="dog", breed="Golden Retriever", owner=owner)
+    mochi = Pet(name="Mochi", age=2, species="cat", breed="Tabby Cat", owner=owner)
     owner.add_pet(biscuit)
     owner.add_pet(mochi)
 

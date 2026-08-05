@@ -4,11 +4,13 @@ from datetime import datetime
 from tabulate import tabulate
 
 from pawpal_system import Owner, Pet, Task, Schedule
+from ai_care_planner import AICarePlanner
 
 # Ensure emoji print correctly even on Windows terminals that default to cp1252.
 sys.stdout.reconfigure(encoding="utf-8")
 
 PRIORITY_LABELS = {"high": "🔴 High", "medium": "🟡 Medium", "low": "🟢 Low"}
+CONFIDENCE_LABELS = {"High": "🟢 High", "Medium": "🟡 Medium", "Low": "🔴 Low"}
 
 
 def priority_label(priority: str) -> str:
@@ -21,6 +23,11 @@ def status_label(is_completed: bool) -> str:
     return "✅ Done" if is_completed else "⏳ Pending"
 
 
+def confidence_label(confidence: str) -> str:
+    """Return a confidence string with a color-coded emoji."""
+    return CONFIDENCE_LABELS.get(confidence, confidence)
+
+
 def print_table(rows: list, title: str):
     """Print a section title followed by a table (or a friendly empty message)."""
     print(f"\n{title}")
@@ -31,10 +38,43 @@ def print_table(rows: list, title: str):
         print("(nothing to show)")
 
 
+def print_care_review(report):
+    """Print an AICarePlanner CareReviewReport to the console."""
+    print("\n🩺 AI Care Review")
+    print("-" * 16)
+
+    if not report.available:
+        for note in report.notes:
+            print(f"ℹ️  {note}")
+        return
+
+    print(
+        f"Overall schedule score for {report.owner_name}'s pets: "
+        f"{report.overall_score} / 10.0  |  "
+        f"Confidence: {confidence_label(report.overall_confidence)}"
+    )
+
+    for review in report.pet_reviews:
+        print(f"\n  {review.pet_name} ({review.species})")
+        print(f"  Score: {review.score} / 10.0  |  Confidence: {confidence_label(review.confidence)}")
+        if review.fallback_used:
+            print("  ⚠️  No species-specific knowledge base entry found; general veterinary guidelines used.")
+        print(f"  {review.summary}")
+        if review.recommendations:
+            print("  Recommendations:")
+            for rec in review.recommendations:
+                print(f"    - {rec}")
+
+    if report.notes:
+        print("\n  Notes:")
+        for note in report.notes:
+            print(f"    - {note}")
+
+
 owner = Owner(name="Jordan", age=30)
 
-biscuit = Pet(name="Biscuit", age=3, breed="Golden Retriever", owner=owner)
-mochi = Pet(name="Mochi", age=2, breed="Tabby Cat", owner=owner)
+biscuit = Pet(name="Biscuit", age=3, species="dog", breed="Golden Retriever", owner=owner)
+mochi = Pet(name="Mochi", age=2, species="cat", breed="Tabby Cat", owner=owner)
 
 owner.add_pet(biscuit)
 owner.add_pet(mochi)
@@ -126,6 +166,9 @@ print("\n🕒 Next Available Slot")
 print("-" * 22)
 next_slot = schedule.next_available_slot()
 print(f"You're free again at {next_slot.strftime('%Y-%m-%d %H:%M')}.")
+
+care_report = AICarePlanner().review_schedule(schedule)
+print_care_review(care_report)
 
 print("\n💾 Saving Data")
 print("-" * 14)

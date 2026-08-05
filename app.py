@@ -1,8 +1,10 @@
 import streamlit as st
 
 from pawpal_system import Owner, Pet, Task, Schedule
+from ai_care_planner import AICarePlanner
 
 PRIORITY_LABELS = {"high": "🔴 High", "medium": "🟡 Medium", "low": "🟢 Low"}
+CONFIDENCE_LABELS = {"High": "🟢 High", "Medium": "🟡 Medium", "Low": "🔴 Low"}
 
 
 def priority_label(priority: str) -> str:
@@ -15,41 +17,62 @@ def status_label(is_completed: bool) -> str:
     return "✅ Done" if is_completed else "⏳ Pending"
 
 
+def confidence_label(confidence: str) -> str:
+    """Return a confidence string with a color-coded emoji."""
+    return CONFIDENCE_LABELS.get(confidence, confidence)
+
+
+def render_care_review(report):
+    """Render an AICarePlanner CareReviewReport in the Streamlit UI."""
+    st.markdown("### 🩺 AI Care Review")
+
+    if not report.available:
+        for note in report.notes:
+            st.info(note)
+        return
+
+    st.write(
+        f"**Overall schedule score for {report.owner_name}'s pets:** "
+        f"{report.overall_score} / 10.0 &nbsp;|&nbsp; "
+        f"**Confidence:** {confidence_label(report.overall_confidence)}"
+    )
+
+    for review in report.pet_reviews:
+        with st.container(border=True):
+            st.markdown(f"#### {review.pet_name} ({review.species})")
+            st.write(
+                f"**Score:** {review.score} / 10.0 &nbsp;|&nbsp; "
+                f"**Confidence:** {confidence_label(review.confidence)}"
+            )
+            if review.fallback_used:
+                st.caption(
+                    "⚠️ No species-specific knowledge base entry found; "
+                    "general veterinary guidelines were used."
+                )
+            st.write(review.summary)
+
+            if review.recommendations:
+                st.markdown("**Recommendations:**")
+                for rec in review.recommendations:
+                    st.write(f"- {rec}")
+
+    if report.notes:
+        st.markdown("**Notes:**")
+        for note in report.notes:
+            st.caption(note)
+
+
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 
-st.title("🐾 PawPal+")
+st.title("🐾 PawPal+ AI Care Planner")
 
 st.markdown(
     """
-Welcome to the PawPal+ starter app.
-
-This file is intentionally thin. It gives you a working Streamlit app so you can start quickly,
-but **it does not implement the project logic**. Your job is to design the system and build it.
-
-Use this app as your interactive demo once your backend classes/functions exist.
+Welcome to **PawPal+**, a pet care planning assistant. Add pets and tasks, build a
+schedule based on your available time, and receive an automatic AI-generated
+review of how well that schedule covers each pet's routine care needs.
 """
 )
-
-with st.expander("Scenario", expanded=True):
-    st.markdown(
-        """
-**PawPal+** is a pet care planning assistant. It helps a pet owner plan care tasks
-for their pet(s) based on constraints like time, priority, and preferences.
-
-You will design and implement the scheduling logic and connect it to this Streamlit UI.
-"""
-    )
-
-with st.expander("What you need to build", expanded=True):
-    st.markdown(
-        """
-At minimum, your system should:
-- Represent pet care tasks (what needs to happen, how long it takes, priority)
-- Represent the pet and the owner (basic info and preferences)
-- Build a plan/schedule for a day that chooses and orders tasks based on constraints
-- Explain the plan (why each task was chosen and when it happens)
-"""
-    )
 
 st.divider()
 
@@ -73,22 +96,22 @@ with col1:
 with col2:
     breed = st.text_input("Breed", value="Tabby Cat")
 with col3:
-    species = st.selectbox("Species", ["dog", "cat", "other"])
+    species = st.selectbox("Species", ["dog", "cat", "fish", "other"])
 
 if st.button("Add pet"):
-    pet = Pet(name=pet_name, age=0, breed=breed, owner=owner)
+    pet = Pet(name=pet_name, age=0, species=species, breed=breed, owner=owner)
     owner.add_pet(pet)
     owner.save_to_json()
     st.success(f"🐾 Added {pet_name} ({breed})")
 
 if owner.pets:
     st.write("**Current pets:**")
-    st.table([{"Name": p.name, "Breed": p.breed} for p in owner.pets])
+    st.table([{"Name": p.name, "Species": p.species, "Breed": p.breed} for p in owner.pets])
 else:
     st.info("No pets yet. Add one above.")
 
 st.markdown("### Tasks")
-st.caption("Add a few tasks. In your final version, these should feed into your scheduler.")
+st.caption("Add a few tasks. These feed into your scheduler.")
 
 if owner.pets:
     pet_names = [p.name for p in owner.pets]
@@ -217,3 +240,7 @@ if st.button("Generate schedule"):
             st.warning(warning)
     else:
         st.success("✅ No scheduling conflicts found.")
+
+    st.divider()
+    report = AICarePlanner().review_schedule(schedule)
+    render_care_review(report)
