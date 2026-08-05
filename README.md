@@ -183,41 +183,142 @@
 
     ---
 
-    ## 6. Reproducible Example
+    ## 6. Reproducible Demo Interactions
 
-    Running `python main.py` against the sample data (Biscuit the dog, Mochi the cat,
-    one overdue vet checkup, and a same-time conflict) produces output like:
+    ### Demo 1: End-to-End CLI Schedule Review
 
-    ```text
-    🩺 AI Care Review
-    ----------------
-    Overall schedule score for Jordan's pets: 6.9 / 10.0  |  Confidence: 🟢 High
+    Run:
 
-    Biscuit (dog)
-    Score: 5.4 / 10.0  |  Confidence: 🟢 High
-    Biscuit's schedule covers 2/3 core care categories (feeding, exercise/enrichment, grooming/habitat) with 2 task(s) planned for today.
-    Recommendations:
-        - Consider adding a grooming or habitat-cleaning task for Biscuit; see the dog care guidance in the knowledge base.
-        - Biscuit's 'Vet checkup' is overdue (was due 2026-07-08 08:00); reschedule it soon.
-        - Biscuit's 'Feeding' is overdue (was due 2026-08-04 22:14); reschedule it soon.
-        - Biscuit's 'Morning walk' is overdue (was due 2026-08-04 22:14); reschedule it soon.
-
-    Mochi (cat)
-    Score: 8.4 / 10.0  |  Confidence: 🟢 High
-    Mochi's schedule covers 2/3 core care categories (feeding, exercise/enrichment, grooming/habitat) with 1 task(s) planned for today.
-    Recommendations:
-        - Consider adding a feeding task for Mochi; see the cat care guidance in the knowledge base.
-        - Mochi's 'Grooming' is overdue (was due 2026-07-08 08:00); reschedule it soon.
-        - Mochi's 'Playtime' is overdue (was due 2026-08-04 22:14); reschedule it soon.
-
-    Notes:
-        - 1 scheduling conflict(s) were detected across pets; review the conflict list before finalizing today's plan.
-        - This AI review supports pet care scheduling only. It does not diagnose illness, prescribe treatment, or replace a licensed veterinarian.
+    ```bash
+    python main.py
     ```
 
-    This example is fully reproducible by running `python main.py` — the sample owner,
-    pets, and tasks are hardcoded in the script (only the "overdue" timestamps will
-    shift relative to whenever you run it, since they're computed from `datetime.now()`).
+    Sample input built into `main.py`:
+
+    ```text
+    Owner: Jordan
+    Available time: 60 minutes
+
+    Pet: Biscuit
+    Species: dog
+    Tasks:
+    - Feeding, 10 minutes, high priority
+    - Morning walk, 30 minutes, high priority
+    - Vet checkup, 30 minutes, high priority
+
+    Pet: Mochi
+    Species: cat
+    Tasks:
+    - Playtime, 20 minutes, low priority
+    - Litter box cleaning, 15 minutes, medium priority
+    - Grooming, 30 minutes, medium priority
+    ```
+
+    Sample output:
+
+    ```text
+    Today's Schedule
+    - Biscuit: Feeding, High, 10 minutes
+    - Biscuit: Morning walk, High, 30 minutes
+    - Mochi: Litter box cleaning, Medium, 15 minutes
+
+    AI Care Review
+
+    Overall schedule score for Jordan's pets: 6.9 / 10.0
+    Confidence: High
+
+    Biscuit:
+    Score: 5.4 / 10.0
+    Recommendation: Add a grooming or habitat-cleaning task.
+    Warning: Vet checkup is overdue.
+
+    Mochi:
+    Score: 8.4 / 10.0
+    Recommendation: Add a feeding task.
+
+    Guardrail result:
+    This AI review supports pet care scheduling only. It does not diagnose
+    illness, prescribe treatment, or replace a licensed veterinarian.
+    ```
+
+    ---
+
+    ### Demo 2: Unknown-Species Retrieval Fallback
+
+    This scenario is included in `evaluate.py`.
+
+    Input:
+
+    ```text
+    Pet name: Rex
+    Species: iguana
+    Breed: Green Iguana
+    Task: Feeding
+    Priority: medium
+    Available time: 60 minutes
+    ```
+
+    System behavior:
+
+    ```text
+    - No iguana-specific knowledge file is available.
+    - The retriever falls back to veterinary_guidelines.md.
+    - Confidence is reduced from High to Medium.
+    - The recommendation explicitly explains that general veterinary guidance
+    was used.
+    ```
+
+    Evaluation result:
+
+    ```text
+    PASS - fallback flag is set for unknown species
+    PASS - confidence is Medium for a fallback review
+    PASS - fallback is disclosed in recommendations
+    ```
+
+    ---
+
+    ### Demo 3: Reliability and Guardrail Evaluation
+
+    Run:
+
+    ```bash
+    python evaluate.py
+    ```
+
+    The evaluation harness tests:
+
+    ```text
+    - Full dog care-category coverage
+    - Missing cat care categories
+    - Unknown-species fallback
+    - Owner with no tasks
+    - Tasks present but no generated schedule
+    - Overdue high-priority tasks
+    - Medical-sounding language redaction
+    ```
+
+    Actual output:
+
+    ```text
+    ============================================================
+    Results: 18 passed, 0 failed
+    ============================================================
+    ```
+
+    The original scheduler tests can also be reproduced with:
+
+    ```bash
+    python -m pytest
+    ```
+
+    Actual output:
+
+    ```text
+    collected 5 items
+    tests/test_pawpal.py ..... [100%]
+    5 passed
+    ```
 
     ---
 
